@@ -13,5 +13,5 @@ __pycache__/
 *.pyc
 
 # Local configuration containing machine-specific paths
-Apziva_Config.py
+
 Trading_Agent_Paths.py

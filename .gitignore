@@ -1,0 +1,17 @@
+# Local secrets and credentials
+credentials/
+credentials.json
+*.pem
+*.key
+.env
+.env.*
+.streamlit/secrets.toml
+
+# Local/private application data
+logs/
+__pycache__/
+*.pyc
+
+# Local configuration containing machine-specific paths
+Apziva_Config.py
+Trading_Agent_Paths.py

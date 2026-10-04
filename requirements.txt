@@ -1,0 +1,12 @@
+streamlit
+requests
+pandas
+numpy
+scipy
+scikit-learn
+joblib
+gspread
+google-auth
+Authlib>=1.3.2
+llama-cpp-python==0.3.36
+torch

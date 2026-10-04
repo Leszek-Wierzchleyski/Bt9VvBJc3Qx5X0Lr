@@ -1,1 +1,2 @@
-# Bt9VvBJc3Qx5X0Lr
+[Algorithmic_Trading_System_Technical_Documentation_Final.pdf](https://github.com/user-attachments/files/33037773/Algorithmic_Trading_System_Technical_Documentation_Final.pdf)
+

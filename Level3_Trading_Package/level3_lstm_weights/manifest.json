@@ -1,0 +1,58 @@
+[
+  {
+    "decision_index": 250,
+    "file": "level3_lstm_weights/lstm_0250.pt"
+  },
+  {
+    "decision_index": 340,
+    "file": "level3_lstm_weights/lstm_0340.pt"
+  },
+  {
+    "decision_index": 430,
+    "file": "level3_lstm_weights/lstm_0430.pt"
+  },
+  {
+    "decision_index": 520,
+    "file": "level3_lstm_weights/lstm_0520.pt"
+  },
+  {
+    "decision_index": 610,
+    "file": "level3_lstm_weights/lstm_0610.pt"
+  },
+  {
+    "decision_index": 700,
+    "file": "level3_lstm_weights/lstm_0700.pt"
+  },
+  {
+    "decision_index": 790,
+    "file": "level3_lstm_weights/lstm_0790.pt"
+  },
+  {
+    "decision_index": 880,
+    "file": "level3_lstm_weights/lstm_0880.pt"
+  },
+  {
+    "decision_index": 970,
+    "file": "level3_lstm_weights/lstm_0970.pt"
+  },
+  {
+    "decision_index": 1060,
+    "file": "level3_lstm_weights/lstm_1060.pt"
+  },
+  {
+    "decision_index": 1150,
+    "file": "level3_lstm_weights/lstm_1150.pt"
+  },
+  {
+    "decision_index": 1240,
+    "file": "level3_lstm_weights/lstm_1240.pt"
+  },
+  {
+    "decision_index": 1330,
+    "file": "level3_lstm_weights/lstm_1330.pt"
+  },
+  {
+    "decision_index": 1420,
+    "file": "level3_lstm_weights/lstm_1420.pt"
+  }
+]

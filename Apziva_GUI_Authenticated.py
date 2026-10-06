@@ -8,16 +8,14 @@ existing LlamaInterface confirmation workflow.
 
 from __future__ import annotations
 
-import os
-
 import streamlit as st
-from llama_cpp import Llama
+import torch
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
 from Apziva_Security_Authenticated import audit_event, get_secret, get_session_id, hash_identity
-from Apziva_Config import load_config
 
 from Apziva_Binance_API import BinanceMarketData
-from Apziva_LLM_Interface_Authenticated import LlamaInterface, MODEL_PATH
+from Apziva_LLM_Interface_Authenticated import LlamaInterface, MODEL_ID
 from Apziva_Risk_Manager_Authenticated import RiskManager
 from Apziva_Trading_Strategy_Level1 import TradingStrategyLevel1
 from Apziva_Trading_Strategy_Level2_Final import TradingStrategyLevel2
@@ -92,6 +90,7 @@ def require_authentication():
     custom password system. An optional email allowlist provides basic
     application-level authorization for private demos.
     """
+    
     if not _setting_enabled("AUTH_REQUIRED", default=False):
         return
 
@@ -129,11 +128,9 @@ def require_authentication():
         detail=f"identity={hash_identity(identity)}",
     )
 
-    if hasattr(st, "logout"):
-        with st.sidebar:
-            st.caption("Authenticated session")
-            st.button("Log out", on_click=st.logout, use_container_width=True)
-
+    with st.sidebar:
+        st.caption("Authenticated session")
+        st.button("Log out", on_click=st.logout, use_container_width=True)
 
 require_authentication()
 
@@ -164,38 +161,28 @@ def _level3_factory(budget: float, dca_amount: float):
     )
 
 
-def load_application_config():
-    """Load validated application configuration from Google Sheet/cache."""
-    spreadsheet_id = get_secret("APZIVA_CONFIG_SPREADSHEET_ID")
-    credentials_file = get_secret("GOOGLE_SERVICE_ACCOUNT_FILE")
+def build_runtime():
+    """Create the initial application state.
 
-    config, source = load_config(
-        spreadsheet_id=spreadsheet_id,
-        credentials_file=credentials_file,
-        worksheet_name="Config",
-    )
-
-    return config, source
-
-
-def build_runtime(config):
-    """Create the initial application state from validated configuration."""
-    factories = {
-        1: _level1_factory,
-        2: _level2_factory,
-        3: _level3_factory,
-    }
-
-    selected_level = int(config["default_risk_level"])
-    strategy = factories[selected_level](
+    The initial account starts unfunded. The user can fund it through the
+    confirmed capital-adjustment action. The risk manager is intentionally
+    constructed from the production strategy factories supplied by the
+    application. At this GUI stage Level 2 is the concrete strategy available
+    in this runtime; all three production risk-level factories are registered
+    here without adding trading logic to the GUI layer.
+    """
+    strategy = TradingStrategyLevel2(
         budget=0.0,
-        dca_amount=float(config["default_dca_amount"]),
+        dca_amount=250.0,
     )
-    strategy.trading_enabled = bool(config["trading_enabled_by_default"])
 
     risk_manager = RiskManager(
         current_strategy=strategy,
-        strategy_factories=factories,
+        strategy_factories={
+            1: _level1_factory,
+            2: _level2_factory,
+            3: _level3_factory,
+        },
     )
 
     return strategy, risk_manager
@@ -203,14 +190,21 @@ def build_runtime(config):
 
 @st.cache_resource(show_spinner=False)
 def get_llm_resources():
-    """Load the quantised GGUF model once for the Streamlit process."""
-    model_path = os.getenv("LLAMA_MODEL_PATH", MODEL_PATH)
-    return Llama(
-        model_path=model_path,
-        n_ctx=4096,
-        n_threads=max(1, min(8, os.cpu_count() or 1)),
-        verbose=False,
+    """Load immutable model resources once; no user state is stored here."""
+    device = "mps" if torch.backends.mps.is_available() else "cpu"
+    hf_token = get_secret("HF_TOKEN")
+
+    tokenizer_kwargs = {"token": hf_token} if hf_token else {}
+    model_kwargs = {"token": hf_token} if hf_token else {}
+
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, **tokenizer_kwargs)
+    model = AutoModelForCausalLM.from_pretrained(
+        MODEL_ID,
+        dtype=torch.float16 if device != "cpu" else torch.float32,
+        **model_kwargs,
     )
+    model.to(device)
+    return tokenizer, model, device
 
 
 def initialise_session():
@@ -219,33 +213,21 @@ def initialise_session():
         st.session_state.session_id = get_session_id()
         audit_event("session_created", session_id=st.session_state.session_id)
 
-    config, config_source = load_application_config()
-    st.session_state.config = config
-    st.session_state.config_source = config_source
-
     if "strategy" not in st.session_state or "risk_manager" not in st.session_state:
-        strategy, risk_manager = build_runtime(config)
+        strategy, risk_manager = build_runtime()
         st.session_state.strategy = strategy
         st.session_state.risk_manager = risk_manager
-        audit_event(
-            "session_state_initialized",
-            session_id=st.session_state.session_id,
-            detail=f"config_source={config_source}",
-        )
+        audit_event("session_state_initialized", session_id=st.session_state.session_id)
 
     if "interface" not in st.session_state:
-        model = get_llm_resources()
+        tokenizer, model, device = get_llm_resources()
         st.session_state.interface = LlamaInterface(
             trading_strategy=st.session_state.strategy,
-            market_data=BinanceMarketData(
-                symbol=config["market_symbol"],
-                base_url="https://api.binance.com",
-                default_interval=config["market_data_interval"],
-                default_limit=int(config["market_data_limit"]),
-            ),
+            market_data=BinanceMarketData(),
             risk_manager=st.session_state.risk_manager,
+            tokenizer=tokenizer,
             model=model,
-            device="cpu",
+            device=device,
             session_id=st.session_state.session_id,
         )
 
@@ -322,10 +304,10 @@ A portfolio drawdown safeguard can temporarily stop new purchases during signifi
 
 Includes everything in Level 1, with additional responses to significant daily Bitcoin price movements.
 
-The strategy responds to significant daily Bitcoin price movements:
+The strategy uses **Average True Range (ATR)** as a measure of Bitcoin's market volatility, alongside daily price movements, to inform its volatility response:
 
-- A daily downside move of 4% or more doubles the next scheduled DCA purchase.
-- A daily upside move of 5% or more triggers a sale equal to 15% of the gain attributable to that day's uptick.
+- Significant downside movements can increase the next scheduled DCA purchase.
+- Significant upside movements can trigger partial profit-taking.
 
 If the relevant volatility conditions are not triggered, the underlying Level 1 strategy continues to operate.
 

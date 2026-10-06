@@ -9,9 +9,11 @@ services:
       GOOGLE_SERVICE_ACCOUNT_FILE: /run/secrets/google_service_account
       LLAMA_MODEL_PATH: /app/models/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf
       AUTH_REQUIRED: ${AUTH_REQUIRED:-false}
+      APZIVA_STATE_DB_PATH: /app/data/trading_state.db
       ALLOWED_EMAILS: ${ALLOWED_EMAILS:-}
     volumes:
       - ${GOOGLE_SERVICE_ACCOUNT_FILE}:/run/secrets/google_service_account:ro
       - ./models:/app/models:ro
       - ./.streamlit/secrets.toml:/app/.streamlit/secrets.toml:ro
+      - ./data:/app/data
     restart: unless-stopped

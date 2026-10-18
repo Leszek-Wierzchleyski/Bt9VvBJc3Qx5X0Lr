@@ -5,12 +5,13 @@
 
 Level 3 = Level 2 + opportunistic ML accumulation.
 
-Level 2 remains the complete fallback strategy.  Level 3 never replaces a
-Level 2 decision.  On an eligible Level 2 BUY, the causal Tree and LSTM models
-are scored using the market history available at that decision.  If BOTH
-probabilities meet the frozen 45% consensus threshold, Level 3 adds one
-additional £250 purchase.  Otherwise the Level 2 decision is executed
-unchanged.
+Level 2 remains the complete baseline strategy. Level 3 never replaces a
+Level 2 decision. The causal Tree and LSTM models are scored on each day using
+market history available at that decision. If BOTH probabilities meet the
+frozen 45% consensus threshold, Level 3 adds one additional £250 purchase,
+independently of whether Level 2's action that day is BUY, HOLD, or SELL.
+The Level 2 action is executed unchanged; the ML purchase is an additional
+transaction, subject to available cash.
 
 Frozen Level 3 parameters
 -------------------------
@@ -189,59 +190,65 @@ class TradingStrategyLevel3(TradingStrategyLevel2):
     # ------------------------------------------------------------------
 
     def make_decision(self, data, previous_price=None):
-        # Level 2 is always the fallback and remains fully responsible for
-        # safeguard, volatility and normal scheduled-DCA behaviour.
+        # Level 2 remains responsible for its own scheduled DCA, volatility
+        # rules, safeguards, and BUY/HOLD/SELL decision.
         base_decision = super().make_decision(data, previous_price=previous_price)
 
         self.last_tree_probability = None
         self.last_lstm_probability = None
         self.last_ml_buy_signal = False
 
-        # The ML layer only adds capital to an eligible Level 2 BUY. It never
-        # overrides a Level 2 HOLD or SELL decision.
-        if base_decision.get("action") != "BUY":
-            return base_decision
-
         if self.market_history is None:
             return base_decision
 
-        normal_amount = float(base_decision.get("amount", 0.0))
-        available_after_normal = self.cash - normal_amount
-        if available_after_normal <= 0:
-            return base_decision
-
+        # Score the ML overlay independently of the Level 2 action. A qualifying
+        # ML signal can add a purchase on BUY, HOLD, or SELL days; it never
+        # changes the underlying Level 2 action itself.
         if not self._ml_additional_buy_signal():
             return base_decision
 
+        normal_amount = (
+            float(base_decision.get("amount", 0.0))
+            if base_decision.get("action") == "BUY"
+            else 0.0
+        )
+        available_after_normal = max(0.0, self.cash - normal_amount)
         extra = min(self.additional_buy_amount, available_after_normal)
         if extra <= 0:
             return base_decision
 
         decision = dict(base_decision)
         decision["ml_additional_amount"] = extra
-        decision["amount"] = normal_amount + extra
-        decision["reason"] = "Level 3 regime DCA + ML additional buy"
+        if base_decision.get("action") == "BUY":
+            decision["amount"] = normal_amount + extra
         decision["level3_tree_probability"] = float(self.last_tree_probability)
         decision["level3_lstm_probability"] = float(self.last_lstm_probability)
         decision["level3_ml_additional_buy"] = True
+        existing_reason = str(base_decision.get("reason", "Level 2 decision"))
+        decision["reason"] = f"{existing_reason}; Level 3 ML additional buy"
         return decision
 
     def execute_decision(self, decision):
-        if decision.get("action") != "BUY":
-            return super().execute_decision(decision)
-
-        normal_amount = decision["amount"] - decision.get("ml_additional_amount", 0.0)
-        btc_bought = self.buy(normal_amount, decision["price"])
-
-        if btc_bought > 0:
-            self.last_dca_day = decision["Timestep"]
-            self.next_dca_multiplier = 1.0
-
         extra = float(decision.get("ml_additional_amount", 0.0))
+
+        if decision.get("action") == "BUY":
+            normal_amount = decision["amount"] - extra
+            btc_bought = self.buy(normal_amount, decision["price"])
+            if btc_bought > 0:
+                self.last_dca_day = decision["Timestep"]
+                self.next_dca_multiplier = 1.0
+        else:
+            # Preserve the Level 2 HOLD/SELL action before the independent ML
+            # purchase. This allows sale proceeds, if any, to become available.
+            btc_bought = super().execute_decision(decision)
+
         if extra > 0:
-            extra_btc = self.buy(extra, decision["price"])
-            btc_bought += extra_btc
-            self.ml_additional_buy_count += 1
-            self.ml_additional_capital_deployed += extra
+            # Re-check available cash at execution time; never overspend.
+            actual_extra = min(extra, self.cash)
+            if actual_extra > 0:
+                extra_btc = self.buy(actual_extra, decision["price"])
+                btc_bought += extra_btc
+                self.ml_additional_buy_count += 1
+                self.ml_additional_capital_deployed += actual_extra
 
         return btc_bought
